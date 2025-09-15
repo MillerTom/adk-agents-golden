@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 
 import os
@@ -5,21 +6,26 @@ import subprocess
 import sys
 from pathlib import Path
 import shutil
+import tempfile
+from datetime import datetime
 
 def log(msg):
-    print(f"[INFO] {msg}")
+    """Prints an informational message."""
+    print(f"[INFO] {datetime.now()} - {msg}")
 
 def error(msg):
-    print(f"[ERROR] {msg}", file=sys.stderr)
+    """Prints an error message and exits."""
+    print(f"[ERROR] {datetime.now()} - {msg}", file=sys.stderr)
     sys.exit(1)
 
 def check_command(cmd):
+    """Checks if a command exists in the system's PATH."""
     if not shutil.which(cmd):
         error(f"Required command '{cmd}' not found. Exiting.")
-    else:
-        log(f"Found command: {cmd}")
+    log(f"Found command: {cmd}")
 
 def run(cmd, cwd=None, check=True):
+    """Runs a command and logs its output."""
     log(f"Running: {' '.join(cmd)}")
     try:
         result = subprocess.run(cmd, cwd=cwd, check=check, capture_output=True, text=True)
@@ -27,70 +33,63 @@ def run(cmd, cwd=None, check=True):
             print(result.stdout)
         if result.stderr:
             print(result.stderr, file=sys.stderr)
+        return result
     except subprocess.CalledProcessError as e:
         error(f"Command failed: {' '.join(cmd)}\nStdout: {e.stdout}\nStderr: {e.stderr}")
+    except FileNotFoundError:
+        error(f"Command not found: {cmd}")
 
 def set_permissions(path, read_only=True):
-    """Recursively set permissions for a directory."""
-    if read_only:
-        log(f"Setting {path} to read-only...")
-        # For directories: r-xr-xr-x (555)
-        # For files: r--r--r-- (444)
+    """Recursively sets permissions for a directory."""
+    mode_str = "read-only" if read_only else "writable for user"
+    log(f"Setting {path} to {mode_str}...")
+    try:
         for root, dirs, files in os.walk(path):
             for d in dirs:
-                os.chmod(os.path.join(root, d), 0o555)
+                os.chmod(os.path.join(root, d), 0o555 if read_only else 0o755)
             for f in files:
-                os.chmod(os.path.join(root, f), 0o444)
-    else:
-        log(f"Setting {path} to writable for user...")
-        # For directories: rwxr-xr-x (755)
-        # For files: rw-r--r-- (644)
-        for root, dirs, files in os.walk(path):
-            for d in dirs:
-                os.chmod(os.path.join(root, d), 0o755)
-            for f in files:
-                os.chmod(os.path.join(root, f), 0o644)
+                os.chmod(os.path.join(root, f), 0o444 if read_only else 0o644)
+    except OSError as e:
+        error(f"Failed to set permissions on {path}: {e}")
+
+def is_debian_based():
+    """Check if the OS is Debian-based."""
+    return os.path.exists("/etc/debian_version")
 
 def install_gh():
-    """Install GitHub CLI if not present."""
+    """Installs the GitHub CLI if not present."""
     if shutil.which("gh"):
         log("GitHub CLI (gh) is already installed.")
         return
 
+    if not is_debian_based():
+        error("This script can only install GitHub CLI on Debian-based systems.")
+
     log("GitHub CLI (gh) not found. Installing...")
     try:
-        # Create the keyring directory
         keyrings_dir = Path("/etc/apt/keyrings")
         if not keyrings_dir.is_dir():
             run(["sudo", "mkdir", "-p", "-m", "755", str(keyrings_dir)])
 
-        # Download the keyring
         keyring_url = "https://cli.github.com/packages/githubcli-archive-keyring.gpg"
         keyring_path = keyrings_dir / "githubcli-archive-keyring.gpg"
         
-        # Use wget to download the key and save it.
-        # We need to run as root to write to /etc/apt/keyrings
-        # The easiest way is to download to a temp file and then move it with sudo.
-        import tempfile
         with tempfile.NamedTemporaryFile(delete=False) as tmp:
             run(["wget", "-qO", tmp.name, keyring_url])
             run(["sudo", "mv", tmp.name, str(keyring_path)])
 
         run(["sudo", "chmod", "go+r", str(keyring_path)])
 
-        # Add the repository source
         arch = subprocess.check_output(["dpkg", "--print-architecture"]).decode("utf-8").strip()
         sources_list_path = "/etc/apt/sources.list.d/github-cli.list"
         sources_list_content = f"deb [arch={arch} signed-by={keyring_path}] https://cli.github.com/packages stable main"
         
-        # Write content to a temp file and move it with sudo
         with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmp:
             tmp.write(sources_list_content)
             tmp_path = tmp.name
         
         run(["sudo", "mv", tmp_path, sources_list_path])
 
-        # Update and install
         run(["sudo", "apt-get", "update"])
         run(["sudo", "apt-get", "install", "-y", "gh"])
         log("GitHub CLI installed successfully.")
@@ -99,32 +98,26 @@ def install_gh():
         error(f"Failed to install GitHub CLI: {e}")
 
 def main():
+    print(f"===== post-create.py START - {datetime.now()} =====")
 
-    from datetime import datetime
-
-    print("===== post-create.py START =====")
-    print(datetime.now())
-
-    # Grounding: Check for required commands and directories
     log("Checking for required commands and directories...")
-    install_gh() # Install gh first if needed
+    install_gh()
     for cmd in ["git", "python3", "pip", "gh"]:
         check_command(cmd)
 
     workspaces_dir = Path("/workspaces")
     if not workspaces_dir.is_dir():
         error("/workspaces directory does not exist. Exiting.")
-    else:
-        log("/workspaces directory exists.")
+    log("/workspaces directory exists.")
 
     repo_name = os.environ.get("GITHUB_REPOSITORY", "adk-agents-golden").split("/")[-1]
     root_dir = Path(f"/workspaces/{repo_name}")
     if not root_dir.is_dir():
         root_dir = Path("/workspaces/adk-agents-golden")
+    
     os.chdir(root_dir)
-    log(f"Changed directory to {root_dir}")
+    log(f"Changed directory to {os.getcwd()}")
 
-    # Clone Google ADK repos into a separate read-only directory
     reference_dir = Path("/workspaces/adk-reference-repos")
     reference_dir.mkdir(parents=True, exist_ok=True)
     log(f"Cloning reference repositories into {reference_dir}")
@@ -145,24 +138,30 @@ def main():
             set_permissions(repo_path, read_only=False)
             run(["git", "pull"], cwd=str(repo_path))
         
-        # Set the repository to read-only
         set_permissions(repo_path, read_only=True)
 
     os.chdir(root_dir)
-    log(f"Changed directory back to {root_dir}")
+    log(f"Changed directory back to {os.getcwd()}")
 
-    # Setup python env if needed
     venv_dir = root_dir / ".venv"
     if not venv_dir.is_dir():
         log("Creating Python virtual environment...")
-        run(["python3", "-m", "venv", str(venv_dir)])
+        run([sys.executable, "-m", "venv", str(venv_dir)])
     else:
         log("Virtual environment already exists.")
 
-    # Verify venv creation. The terminal is automatically configured by devcontainer.json
     python_executable = venv_dir / "bin/python"
     if not python_executable.is_file():
         error("Python executable not found in virtual environment.")
+    log(f"Virtual environment successfully verified at {venv_dir}")
+
+    log("Upgrading pip...")
+    run([str(python_executable), "-m", "pip", "install", "--upgrade", "pip"])
+    
+    requirements_path = root_dir / "requirements.txt"
+    if requirements_path.is_file():
+        log("Installing dependencies from requirements.txt...")
+        run([str(python_executable), "-m", "pip", "install", "-r", str(requirements_path)])
     else:
         log(f"Virtual environment successfully verified at {venv_dir}")
 

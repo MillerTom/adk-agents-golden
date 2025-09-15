@@ -5,7 +5,7 @@
     "ghcr.io/devcontainers/features/git:1": {}
   },
   // Use bash to avoid relying on executable bit on the script
-  "postCreateCommand": "python3 .devcontainer/post-create.py",
+  "postAttachCommand": "python3 .devcontainer/post-create.py",
   // Configure tool-specific properties.
   "customizations": {
     "vscode": {

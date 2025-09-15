@@ -51,6 +51,53 @@ def set_permissions(path, read_only=True):
             for f in files:
                 os.chmod(os.path.join(root, f), 0o644)
 
+def install_gh():
+    """Install GitHub CLI if not present."""
+    if shutil.which("gh"):
+        log("GitHub CLI (gh) is already installed.")
+        return
+
+    log("GitHub CLI (gh) not found. Installing...")
+    try:
+        # Create the keyring directory
+        keyrings_dir = Path("/etc/apt/keyrings")
+        if not keyrings_dir.is_dir():
+            run(["sudo", "mkdir", "-p", "-m", "755", str(keyrings_dir)])
+
+        # Download the keyring
+        keyring_url = "https://cli.github.com/packages/githubcli-archive-keyring.gpg"
+        keyring_path = keyrings_dir / "githubcli-archive-keyring.gpg"
+        
+        # Use wget to download the key and save it.
+        # We need to run as root to write to /etc/apt/keyrings
+        # The easiest way is to download to a temp file and then move it with sudo.
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            run(["wget", "-qO", tmp.name, keyring_url])
+            run(["sudo", "mv", tmp.name, str(keyring_path)])
+
+        run(["sudo", "chmod", "go+r", str(keyring_path)])
+
+        # Add the repository source
+        arch = subprocess.check_output(["dpkg", "--print-architecture"]).decode("utf-8").strip()
+        sources_list_path = "/etc/apt/sources.list.d/github-cli.list"
+        sources_list_content = f"deb [arch={arch} signed-by={keyring_path}] https://cli.github.com/packages stable main"
+        
+        # Write content to a temp file and move it with sudo
+        with tempfile.NamedTemporaryFile(mode="w", delete=False) as tmp:
+            tmp.write(sources_list_content)
+            tmp_path = tmp.name
+        
+        run(["sudo", "mv", tmp_path, sources_list_path])
+
+        # Update and install
+        run(["sudo", "apt-get", "update"])
+        run(["sudo", "apt-get", "install", "-y", "gh"])
+        log("GitHub CLI installed successfully.")
+
+    except Exception as e:
+        error(f"Failed to install GitHub CLI: {e}")
+
 def main():
 
     from datetime import datetime
@@ -60,7 +107,8 @@ def main():
 
     # Grounding: Check for required commands and directories
     log("Checking for required commands and directories...")
-    for cmd in ["git", "python3", "pip"]:
+    install_gh() # Install gh first if needed
+    for cmd in ["git", "python3", "pip", "gh"]:
         check_command(cmd)
 
     workspaces_dir = Path("/workspaces")

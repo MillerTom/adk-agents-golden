@@ -111,16 +111,12 @@ def main():
     else:
         log("Virtual environment already exists.")
 
-    activate_script = venv_dir / "bin/activate_this.py"
-    if activate_script.is_file():
-        exec(open(activate_script).read(), dict(__file__=str(activate_script)))
-        log("Activated virtual environment.")
+    # Verify venv creation. The terminal is automatically configured by devcontainer.json
+    python_executable = venv_dir / "bin/python"
+    if not python_executable.is_file():
+        error("Python executable not found in virtual environment.")
     else:
-        activate_path = venv_dir / "bin/activate"
-        if activate_path.is_file():
-            log("To activate the venv, run: source .venv/bin/activate")
-        else:
-            error("Virtual environment activation script not found.")
+        log(f"Virtual environment successfully verified at {venv_dir}")
 
     # Install dependencies from requirements.txt if present
     log("Upgrading pip...")

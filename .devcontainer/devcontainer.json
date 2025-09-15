@@ -4,5 +4,14 @@
   "features": {
     "ghcr.io/devcontainers/features/git:1": {}
   },
-  "postCreateCommand": "./.devcontainer/post-create.sh"
+  // Use bash to avoid relying on executable bit on the script
+  "postCreateCommand": "python3 .devcontainer/post-create.py",
+  // Configure tool-specific properties.
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "python.defaultInterpreterPath": "${containerWorkspaceFolder}/.venv/bin/python"
+      }
+    }
+  }
 }
